@@ -254,3 +254,94 @@ function display_verification_id_in_admin_order_meta( $order ) {
     echo '<p><strong>'.__('Map Pin Latitude', 'woocommerce').':</strong> ' . get_post_meta( $order_id, '_user_location_lat', true ) . '</p>';
     echo '<p><strong>'.__('Map Pin Longitude', 'woocommerce').':</strong> ' . get_post_meta( $order_id, '_user_location_long', true ) . '</p>';
 }
+
+
+// Custom Cron Job - Extend Yith WooCommerce Subscription functionality
+function custom_cron_intervals($schedules) {
+    $schedules['every_five_minutes'] = array(
+        'interval' => 300, // 300 seconds = 5 minutes
+        'display'  => __('Every 5 Minutes'),
+    );
+    return $schedules;
+}
+add_filter('cron_schedules', 'custom_cron_intervals');
+
+// Schedule a custom cron event
+function schedule_five_minute_cron() {
+    if (!wp_next_scheduled('my_five_minute_cron_hook')) {
+        wp_schedule_event(time(), 'every_five_minutes', 'my_five_minute_cron_hook');
+    }
+}
+add_action('wp', 'schedule_five_minute_cron');
+
+// Hook your custom function to the cron event
+add_action('my_five_minute_cron_hook', 'my_cron_function');
+
+
+function my_cron_function() {
+    
+	$log_file = WP_CONTENT_DIR . '/cron_log.txt';
+
+    // Checking if the cron job condition is met
+    if (isset($_GET['cron_job']) && $_GET['cron_job'] == 1) {
+        
+        error_log('Cron Job Executed');
+
+        // Ensure script runs for enough time
+        set_time_limit(0); // Unlimited execution time
+        ini_set('memory_limit', '512M'); 
+
+        $current_time = current_time('timestamp'); 
+        $total_updated = 0; 
+
+        $args = array(
+            'post_type'      => 'ywsbs_subscription',
+            'posts_per_page' => -1, // Batch size for each query
+            'orderby'        => 'post_date',
+            'order'          => 'DESC',
+            'fields'         => 'ids', // Only get the IDs for performance
+            'meta_query'     => array(
+                'relation' => 'AND',
+                array(
+                    'key'     => 'status',
+                    'value'   => 'active',
+                    'compare' => '='
+                ),
+                array(
+                    'relation' => 'OR',
+                    array(
+                        'key'     => 'expired_date',
+                        'value'   => $current_time,
+                        'compare' => '<',
+                        'type'    => 'NUMERIC'
+                    ),
+                    array(
+                        'key'     => 'payment_due_date',
+                        'value'   => $current_time,
+                        'compare' => '<',
+                        'type'    => 'NUMERIC'
+                    )
+                )
+            )
+        );
+
+        // Query the posts with the given arguments
+        $query = new WP_Query($args);
+
+        // Update the status of each subscription to 'cancelled'
+        foreach ($query->posts as $subscription_id) {
+            update_post_meta($subscription_id, 'status', 'cancelled');
+            $total_updated++;
+        }
+
+// 		echo "Cron cancelled Job Executed, total records: " . $total_updated;
+
+		if (defined('WP_CRON_LOG') && WP_CRON_LOG) {
+        	file_put_contents($log_file, "Cron cancelled Job Executed, total records: " . $total_updated . " >> " . date("Y-m-d H:i:s") . "\n", FILE_APPEND);
+		}
+	}
+	else {
+	    error_log('Cron Job NOT Executed');
+	}
+}
+
